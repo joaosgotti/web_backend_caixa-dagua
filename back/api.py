@@ -1,197 +1,140 @@
 # api.py
-
-# --- Importação de Bibliotecas ---
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Path
 from fastapi.middleware.cors import CORSMiddleware
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from datetime import datetime, timedelta, timezone
-import os
-from dotenv import load_dotenv
-import pytz
+from datetime import datetime, timedelta, timezone as dt_timezone # Renomeado para dt_timezone
+import pytz # Para conversão de fuso horário para exibição
+from enum import Enum
 
-# --- Carregamento de Variáveis de Ambiente (Apenas para DB) ---
-load_dotenv() # Ainda necessário para as variáveis do banco de dados
 
-# --- CONFIGURAÇÕES FIXAS DE NÍVEL ---
-MIN_NIVEL_VALUE = int(os.getenv("MIN_NIVEL"))
-MAX_NIVEL_VALUE = int(os.getenv("MAX_NIVEL"))
+# --- Módulos Locais ---
+import config_api
+from database_api import get_db_session
+from models_api import Leitura
+from sqlalchemy.orm import Session
+from sqlalchemy import desc, asc
 
-# Validação simples para garantir que max > min ao iniciar
-if MAX_NIVEL_VALUE <= MIN_NIVEL_VALUE:
-    print(f"--- ERRO DE CONFIGURAÇÃO FIXA: MAX_NIVEL ({MAX_NIVEL_VALUE}) deve ser maior que MIN_NIVEL ({MIN_NIVEL_VALUE}) ---")
-    # Em um caso real, você poderia querer parar a aplicação aqui:
-    # import sys
-    # sys.exit(1)
+# --- CONFIGURAÇÕES ---
+MIN_NIVEL_VALUE = config_api.MIN_NIVEL
+MAX_NIVEL_VALUE = config_api.MAX_NIVEL
 
-# --- Configuração da Aplicação FastAPI ---
+# --- Enum para Unidade de Tempo ---
+class TimeUnit(str, Enum):
+    hours = "h"
+    days = "d"
+
+# --- Aplicação FastAPI ---
 app = FastAPI(
-    title="API de Leituras do Sensor de Distância",
-    description="API para acessar dados de distância do sensor salvos no banco de dados.",
-    version="1.0.0",
+    title="API de Leituras do Sensor de Distância (SQLAlchemy & Timezone)",
+    description="API para acessar dados de distância do sensor, com tratamento de fuso horário.",
+    version="1.2.0",
 )
-
-# --- Configuração do Middleware CORS ---
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], # Em produção, use domínios específicos
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# --- Função de Conexão com o Banco de Dados ---
-def connect_db():
-    """
-    Estabelece uma conexão com o banco de dados PostgreSQL usando credenciais de variáveis de ambiente.
-    """
-    db_name = os.getenv("DB_NAME")
-    db_user = os.getenv("DB_USER")
-    db_password = os.getenv("DB_PASSWORD")
-    db_host = os.getenv("DB_HOST")
-    db_port = os.getenv("DB_PORT", "5432")
-    required_vars = {'DB_NAME': db_name,'DB_USER': db_user,'DB_PASSWORD': db_password,'DB_HOST': db_host}
-    missing_vars = [k for k, v in required_vars.items() if not v]
-    if missing_vars:
-        print(f"API Erro Crítico: Variáveis de ambiente do banco de dados ausentes: {', '.join(missing_vars)}")
-        return None
-    try:
-        connection = psycopg2.connect(dbname=db_name,user=db_user,password=db_password,host=db_host,port=db_port,connect_timeout=5)
-        return connection
-    except psycopg2.OperationalError as e: print(f"API Erro OPERACIONAL ao conectar ao banco de dados: {e}"); return None
-    except psycopg2.Error as e: print(f"API Erro psycopg2 ao conectar ao banco de dados: {e}"); return None
-    except Exception as e: print(f"API Erro INESPERADO durante a conexão com o banco de dados: {e}"); return None
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 # --- Função Auxiliar para Calcular Nível ---
 def calcular_nivel_percentual(distancia_original: float | int | None, min_val: int, max_val: int) -> int | None:
-    """
-    Calcula o nível como porcentagem com base na distância e nos valores min/max.
-    Retorna um inteiro (0-100) ou None se a distância não for válida.
-    """
-    if not isinstance(distancia_original, (int, float)):
-        return None
-
-    # Calcula o tamanho total do intervalo válido
+    if not isinstance(distancia_original, (int, float)): return None
     range_nivel = max_val - min_val
-
-    # Verifica se o intervalo é válido (evita divisão por zero)
-    if range_nivel == 0:
-        # print("API Aviso: MIN_NIVEL_VALUE e MAX_NIVEL_VALUE são iguais. Nível definido como 0%.") # Evitar spam no log se chamado em loop
-        return 0 # Nível é 0 se o range for 0
-
-    # Calcula onde a distância atual se encontra dentro do intervalo (valor entre 0 e 1 geralmente)
-    # Lembre-se: menor distância = maior nível (reservatório mais cheio)
+    if range_nivel == 0: return 0
     nivel_normalizado = 1 - ((distancia_original - min_val) / range_nivel)
-    # Converte para porcentagem e garante que fique entre 0 e 100
     nivel_percentual = max(0.0, min(100.0, nivel_normalizado * 100.0))
-
     return round(nivel_percentual)
 
-# --- Endpoints da API ---
+# --- Função Auxiliar para Processar Leitura ---
+def processar_leitura_para_resposta(leitura_obj: Leitura, target_tz_str: str = 'America/Recife'):
+    """
+    Converte um objeto Leitura SQLAlchemy para um dict, ajusta timestamp para o fuso alvo e calcula nível.
+    """
+    if not leitura_obj:
+        return None
+    
+    db_timestamp_aware = leitura_obj.created_on
 
-@app.get("/leituras/ultima", summary="Obter a última leitura (distância e nível calculado)")
-def get_ultima_leitura():
-    """
-    Busca a leitura de distância mais recente, calcula o 'nivel' (como porcentagem)
-    usando os valores fixos MIN_NIVEL_VALUE e MAX_NIVEL_VALUE, e retorna com fuso de Recife.
-    """
-    conn = None
+    if db_timestamp_aware.tzinfo is None or db_timestamp_aware.tzinfo.utcoffset(db_timestamp_aware) is None:
+        print(f"AVISO (ID: {leitura_obj.id}): Timestamp do DB (SQLAlchemy) veio como naive ou sem offset. Assumindo UTC e tornando aware.")
+        db_timestamp_aware = db_timestamp_aware.replace(tzinfo=dt_timezone.utc)
+
     try:
-        conn = connect_db()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Serviço indisponível: Falha na conexão com o banco de dados")
+        target_timezone = pytz.timezone(target_tz_str)
+        display_timestamp = db_timestamp_aware.astimezone(target_timezone)
+        created_on_iso_display = display_timestamp.isoformat()
+    except pytz.exceptions.UnknownTimeZoneError:
+        print(f"AVISO: Fuso horário '{target_tz_str}' desconhecido. Usando timestamp original (provavelmente UTC) para created_on.")
+        created_on_iso_display = db_timestamp_aware.isoformat() 
 
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT id, distancia, created_on FROM leituras ORDER BY created_on DESC LIMIT 1;")
-            result = cur.fetchone()
+    leitura_dict = {
+        "id": leitura_obj.id,
+        "distancia": leitura_obj.distancia,
+        "created_on": created_on_iso_display, # Timestamp formatado para exibição
+    }
 
-        if result:
-            # 1. Processa o Timestamp
-            original_datetime = result['created_on']
-            if original_datetime.tzinfo is None:
-                print(f"AVISO (ID: {result['id']}): Timestamp do DB veio como naive. Assumindo UTC.")
-                original_datetime = original_datetime.replace(tzinfo=timezone.utc)
-            local_timezone = pytz.timezone('America/Recife')
-            local_datetime = original_datetime.astimezone(local_timezone)
-            result['created_on'] = local_datetime.isoformat()
+    # Cálculo do Nível
+    leitura_dict['nivel'] = calcular_nivel_percentual(
+        leitura_obj.distancia, # Usa a distância diretamente do objeto
+        config_api.MIN_NIVEL,
+        config_api.MAX_NIVEL
+    )
+    return leitura_dict
 
-            # 2. Calcula e Adiciona o Nível
-            distancia_original = result.get('distancia')
-            result['nivel'] = calcular_nivel_percentual(distancia_original, MIN_NIVEL_VALUE, MAX_NIVEL_VALUE)
+# --- Endpoints da API com SQLAlchemy ---
+@app.get("/leituras/ultima", summary="Obter a última leitura (SQLAlchemy & Timezone)")
+def get_ultima_leitura_sqlalchemy(db: Session = Depends(get_db_session)):
+    try:
+        ultima_leitura_obj = db.query(Leitura).order_by(desc(Leitura.created_on)).first()
 
-            # 3. Retorna o dicionário completo
-            return result
+        if ultima_leitura_obj:
+            return processar_leitura_para_resposta(ultima_leitura_obj)
         else:
-            # Se nenhuma leitura for encontrada
             return {}
-
-    except HTTPException as http_exc:
-        raise http_exc
-    except (Exception, psycopg2.Error) as e:
-        print(f"API Erro em /leituras/ultima: {e}")
+    except Exception as e:
+        print(f"API Erro SQLAlchemy em /leituras/ultima: {e}")
         raise HTTPException(status_code=500, detail="Erro interno do servidor ao buscar última leitura")
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except psycopg2.Error as close_err:
-                print(f"API Erro ao fechar conexão DB em /leituras/ultima: {close_err}")
 
-@app.get("/leituras", summary="Obter leituras de distância e nível em um período")
-def get_leituras_por_periodo(
-    periodo_horas: int = 24
+@app.get("/leituras/{unit}/{value}", summary="Obter leituras por período flexível (horas ou dias)")
+def get_leituras_por_periodo_flexivel(
+    unit: TimeUnit, # Usa o Enum para validar a unidade (h ou d)
+    value: int = Path(..., ge=1), # Path parameter, deve ser um inteiro >= 1
+    db: Session = Depends(get_db_session)
 ):
     """
-    Busca leituras de DISTÂNCIA dentro de um período, calcula o 'nivel' para cada uma,
-    e as retorna com o fuso horário de Recife.
+    Busca leituras de DISTÂNCIA dentro de um período especificado pela unidade (h para horas, d para dias)
+    e um valor numérico. Retorna com o fuso horário de Recife.
     """
-    conn = None
+    delta = None
+    if unit == TimeUnit.hours:
+        delta = timedelta(hours=value)
+    elif unit == TimeUnit.days:
+        delta = timedelta(days=value)
+    else:
+        # Esta verificação é redundante se o Enum funcionar corretamente, mas por segurança
+        raise HTTPException(status_code=400, detail="Unidade de tempo inválida. Use 'h' para horas ou 'd' para dias.")
+
     try:
-        conn = connect_db()
-        if not conn:
-            raise HTTPException(status_code=503, detail="Serviço indisponível: Falha na conexão com o banco de dados")
+        limite_tempo_utc = datetime.now(dt_timezone.utc) - delta
 
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            limite_tempo_utc = datetime.now(timezone.utc) - timedelta(hours=periodo_horas)
-            cur.execute(
-                "SELECT id, distancia, created_on FROM leituras WHERE created_on >= %s ORDER BY created_on ASC;",
-                (limite_tempo_utc,)
-            )
-            resultados = cur.fetchall()
-
-        local_timezone = pytz.timezone('America/Recife')
-        leituras_processadas = []
-        for leitura in resultados:
-            # Processa o Timestamp
-            original_datetime = leitura['created_on']
-            if original_datetime.tzinfo is None:
-                 print(f"AVISO (ID: {leitura['id']}): Timestamp do DB veio como naive. Assumindo UTC.")
-                 original_datetime = original_datetime.replace(tzinfo=timezone.utc)
-            local_datetime = original_datetime.astimezone(local_timezone)
-            leitura['created_on'] = local_datetime.isoformat()
-
-            # Calcula e Adiciona o Nível
-            distancia_original = leitura.get('distancia')
-            leitura['nivel'] = calcular_nivel_percentual(distancia_original, MIN_NIVEL_VALUE, MAX_NIVEL_VALUE)
-
-            leituras_processadas.append(leitura)
-
+        leituras_objs = db.query(Leitura)\
+                          .filter(Leitura.created_on >= limite_tempo_utc)\
+                          .order_by(asc(Leitura.created_on))\
+                          .all()
+        
+        leituras_processadas = [
+            processar_leitura_para_resposta(leitura_obj) for leitura_obj in leituras_objs if leitura_obj
+        ]
+        
         return leituras_processadas
+    except Exception as e:
+        print(f"API Erro SQLAlchemy em /leituras/{unit.value}/{value}: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro interno do servidor ao buscar histórico para {value} {unit.name}")
 
-    except HTTPException as http_exc:
-        raise http_exc
-    except (Exception, psycopg2.Error) as e:
-        print(f"API Erro em /leituras: {e}")
-        raise HTTPException(status_code=500, detail="Erro interno do servidor ao buscar histórico")
-    finally:
-        if conn:
-            try:
-                conn.close()
-            except psycopg2.Error as close_err:
-                print(f"API Erro ao fechar conexão DB em /leituras: {close_err}")
-
+# --- Bloco para execução direta (teste) ---
 if __name__ == "__main__":
     import uvicorn
-    print("Executando API diretamente com Uvicorn (para teste)...")
-    print("Use 'run_backend.py' ou 'uvicorn api:app --host 0.0.0.0 --port 8000' para execução normal.")
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    try:
+        from database_api import engine as api_engine, Base as api_base
+        print("Tentando criar tabelas da API (se não existirem)...")
+        api_base.metadata.create_all(bind=api_engine)
+        print("Tabelas da API verificadas/criadas.")
+    except Exception as e_db_create:
+        print(f"Erro ao tentar criar tabelas da API: {e_db_create}")
+
+    print("Executando API (SQLAlchemy & Timezone) diretamente com Uvicorn (para teste)...")
+    uvicorn.run("api:app", host="127.0.0.1", port=8000, reload=True)
