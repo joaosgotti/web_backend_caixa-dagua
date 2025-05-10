@@ -1,21 +1,20 @@
 # api.py
+
+# --- Bibliotecas Padrão Python ---
+from datetime import datetime, timedelta, timezone as dt_timezone
+import os
+from typing import List, Literal, Optional
+
+# --- Bibliotecas de Terceiros ---
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends, Path
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime, timedelta, timezone as dt_timezone # Renomeado para dt_timezone
-import pytz # Para conversão de fuso horário para exibição
-from enum import Enum
-from typing import List, Literal, Optional
-
-from models_api import Leitura as LeituraSQLAlchemy, LeituraResponse
-
-# --- Módulos Locais ---
-import config_api
-from database_api import get_db_session
-
-from sqlalchemy.orm import Session
 from sqlalchemy import desc, asc
-import os
+from sqlalchemy.orm import Session
+
+# --- Módulos Locais do Projeto ---
+from database_api import get_db_session
+from models_api import Leitura as LeituraSQLAlchemy, LeituraResponse
 
 # --- CONFIGURAÇÕES ---
 load_dotenv()

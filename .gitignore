@@ -1,6 +1,6 @@
 # Ambientes Virtuais
 venv/
-venv_back/
+venv_backend/
 .venv/
 
 # Arquivos de configuração local (se houver)
