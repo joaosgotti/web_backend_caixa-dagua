@@ -3,9 +3,11 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 import sys
-import config_api
+import os
+from dotenv import load_dotenv
 
-SQLALCHEMY_DATABASE_URL = config_api.DATABASE_URL
+load_dotenv()
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
 
 # echo=True é útil para debug, loga as queries SQL. Remova em produção.
 engine = create_engine(SQLALCHEMY_DATABASE_URL, echo=True)

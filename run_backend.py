@@ -12,7 +12,7 @@ API_MODULE_NAME = os.getenv("API_MODULE_NAME")  # Nome do módulo da API
 API_APP_VARIABLE = os.getenv("API_APP_VARIABLE")  # Nome da variável do app FastAPI
 API_HOST_TO_BIND = os.getenv("API_HOST_TO_BIND")
 API_PORT_TO_LISTEN = os.getenv("API_PORT_TO_LISTEN")  # Porta para escutar
-ENABLE_UVICORN_RELOAD = os.getenv("ENABLE_UVICORN_RELOAD") # Habilitar reload do Uvicorn
+ENABLE_UVICORN_RELOAD = False # Habilitar reload do Uvicorn
 
 # --- Caminhos ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
