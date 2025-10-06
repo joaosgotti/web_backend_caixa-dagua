@@ -8,6 +8,7 @@ from typing import List, Literal, Optional
 # --- Bibliotecas de Terceiros ---
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Depends, Path
+from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import desc, asc
 from sqlalchemy.orm import Session
@@ -28,6 +29,7 @@ app = FastAPI(
     version="1.2.0",
 )
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+templates=Jinja2Templates(directory="templates")
 
 # --- Função Auxiliar para Calcular Nível ---
 def _calcular_nivel_percentual(distancia_original: float | int | None, min_val: int, max_val: int) -> int | None:
@@ -54,13 +56,19 @@ def _converter_leitura_para_resposta(leitura_obj: LeituraSQLAlchemy) -> Optional
 
     leitura_dict['nivel'] = _calcular_nivel_percentual(leitura_obj.distancia,MIN_NIVEL,MAX_NIVEL)
     
-    return leitura_dict
+    leituras_html = templates.TemplateResponse(
+        name = "ultima_leitura.html",
+        context = leitura_dict
+    )
+
+    return leituras_html
 
 # --- Endpoints da API com SQLAlchemy ---    
 @app.get("/leituras/ultima", 
          response_model=Optional[LeituraResponse], # Permite resposta nula se não encontrado
          summary="Obter a última leitura")
 def get_ultima_leitura(db: Session = Depends(get_db_session)):
+
     try:
         ultima_leitura_obj = db.query(LeituraSQLAlchemy).order_by(desc(LeituraSQLAlchemy.created_on)).first()
 
