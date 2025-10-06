@@ -52,6 +52,7 @@ def _converter_leitura_para_resposta(leitura_obj: LeituraSQLAlchemy) -> Optional
         "id": leitura_obj.id,
         "distancia": leitura_obj.distancia,
         "created_on": leitura_obj.created_on.isoformat(), # Timestamp formatado
+        #"nivel": leitura_obj.nivel,
     }
 
     leitura_dict['nivel'] = _calcular_nivel_percentual(leitura_obj.distancia,MIN_NIVEL,MAX_NIVEL)
