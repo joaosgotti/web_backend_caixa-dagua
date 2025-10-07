@@ -1,16 +1,17 @@
 # api.py
 
 # --- Bibliotecas Padrão Python ---
-from datetime import datetime, timedelta, timezone as dt_timezone
 import os
+from datetime import datetime, timedelta, timezone as dt_timezone
 from typing import List, Literal, Optional
 
 # --- Bibliotecas de Terceiros ---
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Depends, Path
-from fastapi.templating import Jinja2Templates
+from fastapi import Depends, FastAPI, HTTPException, Path, Request
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import desc, asc
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import asc, desc
 from sqlalchemy.orm import Session
 
 # --- Módulos Locais do Projeto ---
@@ -33,27 +34,38 @@ templates=Jinja2Templates(directory="templates")
 
 # --- Função Auxiliar para Calcular Nível ---
 def _calcular_nivel_percentual(distancia_original: float | int | None, min_val: int, max_val: int) -> int | None:
-    if not isinstance(distancia_original, (int, float)): return None
+    if not isinstance(distancia_original, (int, float)): 
+        return None
+    
     range_nivel = max_val - min_val
-    if range_nivel == 0: return 0
+    
+    if range_nivel == 0: 
+        return 0
+    
     nivel_normalizado = 1 - ((distancia_original - min_val) / range_nivel)
+    
     nivel_percentual = max(0.0, min(100.0, nivel_normalizado * 100.0))
+    
     return round(nivel_percentual)
 
 # --- Função Auxiliar para Processar Leitura ---
-def _converter_leitura_para_resposta(leitura_obj: LeituraSQLAlchemy) -> Optional[LeituraResponse]:
+def _processar_leitura(leitura_obj: LeituraSQLAlchemy) -> Optional[LeituraResponse]:
     """
-    Converte um objeto Leitura SQLAlchemy para um dict, formata o timestamp UTC para ISO, e calcula o nível.
+    Converte um objeto Leitura SQLAlchemy para o modelo Pydantic LeituraResponse,
+    calculando o nível e formatando a data.
     """
     if not leitura_obj:
         return None
 
-    leitura_dict = {
-        "id": leitura_obj.id,
-        "distancia": leitura_obj.distancia,
-        "created_on": leitura_obj.created_on.isoformat(), # Timestamp formatado
-        #"nivel": leitura_obj.nivel,
-    }
+    nivel_percentual = _calcular_nivel_percentual(leitura_obj.distancia, MIN_NIVEL, MAX_NIVEL)
+
+    # Retorna um objeto Pydantic, não mais um TemplateResponse
+    return LeituraResponse(
+        id=leitura_obj.id,
+        distancia=leitura_obj.distancia,
+        nivel=nivel_percentual,
+        created_on=leitura_obj.created_on 
+    )
 
     leitura_dict['nivel'] = _calcular_nivel_percentual(leitura_obj.distancia,MIN_NIVEL,MAX_NIVEL)
     
@@ -64,24 +76,34 @@ def _converter_leitura_para_resposta(leitura_obj: LeituraSQLAlchemy) -> Optional
 
     return leituras_html
 
-# --- Endpoints da API com SQLAlchemy ---    
-@app.get("/leituras/ultima", 
-         response_model=Optional[LeituraResponse], # Permite resposta nula se não encontrado
-         summary="Obter a última leitura")
-def get_ultima_leitura(db: Session = Depends(get_db_session)):
-
+@app.get("/leituras/ultima_html",
+         response_class=HTMLResponse,
+         summary="Mostrar a última leitura em uma página web (HTML)")
+async def get_ultima_leitura_html(request: Request, db: Session = Depends(get_db_session)):
     try:
         ultima_leitura_obj = db.query(LeituraSQLAlchemy).order_by(desc(LeituraSQLAlchemy.created_on)).first()
 
         if not ultima_leitura_obj:
-            raise HTTPException(status_code=404, detail="Nenhuma leitura encontrada")
+            # Se não houver dados, retorna um HTML de erro 404
+            contexto_erro = {"request": request, "mensagem": "Nenhuma leitura encontrada no banco de dados."}
+            return templates.TemplateResponse("error.html", contexto_erro, status_code=404)
         
-        return _converter_leitura_para_resposta(ultima_leitura_obj)
-    except HTTPException: # Re-raise HTTPExceptions para não mascará-las
-        raise
+        leitura_processada = _processar_leitura(ultima_leitura_obj)
+        
+        contexto_jinja = {
+            "request": request, 
+            "leitura": leitura_processada 
+        }
+        
+        return templates.TemplateResponse(
+            name="ultima_leitura.html",
+            context=contexto_jinja
+        )
+
     except Exception as e:
-        print(f"API Erro em /leituras/ultima: {e}") # Logar o erro 'e' melhor em produção
-        raise HTTPException(status_code=500, detail="Erro interno do servidor")
+        print(f"API Erro em /leituras/ultima_html: {e}") 
+        contexto_erro = {"request": request, "mensagem": f"Ocorreu um erro interno no servidor: {e}"}
+        return templates.TemplateResponse("error.html", contexto_erro, status_code=500)
 
 @app.get("/leituras/{unit}/{value}",
          response_model=List[LeituraResponse],
@@ -101,7 +123,6 @@ def get_leituras_por_periodo(
                           .order_by(asc(LeituraSQLAlchemy.created_on))\
                           .all()
         
-        return [_converter_leitura_para_resposta(leitura) for leitura in leituras_objs]
+        return [_processar_leitura(leitura) for leitura in leituras_objs]
     except Exception:
-        # Em produção, logue o erro 'e' com exc_info=True
         raise HTTPException(status_code=500, detail="Erro interno do servidor ao buscar histórico")
