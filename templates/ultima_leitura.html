@@ -5,8 +5,7 @@
   {% if leitura %}
     <p>ID: {{ leitura.id }}</p>
     <p>Distância: {{ leitura.distancia }} cm</p>
-    <p>Nível: {% if leitura.nivel is not none %}{{ leitura.nivel }}%{% else %}N/A{% endif %}</p>
-    <p>Data: {{ leitura.created_on }}</p>
+    <p>Nível: {% if leitura.nivel is not none %}{{ leitura.nivel }}%{% else %}N/A{% endif %}</p>    <p>Data: {{ leitura.created_on }}</p>
   {% else %}
     <p>Nenhuma leitura encontrada.</p>
   {% endif %}

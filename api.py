@@ -1,7 +1,5 @@
 # api.py
 
-# --- IBLIOTECAS E MÓDULOS ---
-
 # Bibliotecas
 import os
 from datetime import datetime, timedelta, timezone as dt_timezone
