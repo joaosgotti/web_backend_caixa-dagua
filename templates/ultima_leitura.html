@@ -1,32 +1,14 @@
-<!DOCTYPE html>
+<!-- templates/ultima_leitura.html -->
 <html>
-<head>
-    <title>Detalhes da Leitura</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .data-card {
-            border: 1px solid #ccc;
-            padding: 20px;
-            border-radius: 8px;
-            max-width: 400px;
-            margin: auto;
-            box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
-        }
-        h2 { color: #333; }
-        p { margin: 5px 0; }
-        span { font-weight: bold; color: #007BFF; }
-    </style>
-</head>
 <body>
-    <div class="data-card">
-        <h2>Dados Capturados</h2>
-        
-        <p>ID da Leitura: <span>{{ id }}</span></p>
-        <p>Distância: <span>{{ distancia }} metros</span></p>
-        <p>Nivel: <span>{{ Nivel }} % </span></p>
-        <p>Criado em: <span>{{ created_on }}</span></p>
-        
-        <br>
-    </div>
+  <h1>Última Leitura</h1>
+  {% if leitura %}
+    <p>ID: {{ leitura.id }}</p>
+    <p>Distância: {{ leitura.distancia }} cm</p>
+    <p>Nível: {{ leitura.nivel }} %</p>
+    <p>Data: {{ leitura.created_on }}</p>
+  {% else %}
+    <p>Nenhuma leitura encontrada.</p>
+  {% endif %}
 </body>
 </html>
