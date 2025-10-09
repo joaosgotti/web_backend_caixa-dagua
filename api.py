@@ -92,6 +92,7 @@ async def get_ultima_leitura_html(request: Request, db: Session = Depends(get_db
             return templates.TemplateResponse("error.html", contexto_erro, status_code=404)
         
         leitura_processada = _processar_leitura(ultima_leitura_obj)
+        print("oieeeeee")
         print(leitura_processada.nivel)
         print(leitura_processada.distancia)
         contexto_jinja = {
