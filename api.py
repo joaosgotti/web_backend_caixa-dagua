@@ -1,6 +1,6 @@
 # api.py
 
-# --- 1. BIBLIOTECAS E MÓDULOS ---
+# --- IBLIOTECAS E MÓDULOS ---
 
 # Bibliotecas
 import os
@@ -19,7 +19,7 @@ from database_api import get_db_session
 from models_api import Leitura as LeituraSQLAlchemy, LeituraResponse
 
 
-# --- 2. CONFIGURAÇÃO E INICIALIZAÇÃO DA APP ---
+# --- CONFIGURAÇÃO E INICIALIZAÇÃO DA APP ---
 
 load_dotenv()
 
@@ -47,8 +47,6 @@ app.add_middleware(
 templates = Jinja2Templates(directory="templates")
 
 
-# --- 3. FUNÇÕES AUXILIARES ---
-
 def _calcular_nivel_percentual(distancia_original: float | int | None, min_val: int, max_val: int) -> int | None:
     """Calcula o nível percentual da água com base na distância medida."""
     if not isinstance(distancia_original, (int, float)):
@@ -58,10 +56,8 @@ def _calcular_nivel_percentual(distancia_original: float | int | None, min_val: 
     if range_nivel == 0:
         return 0
     
-    # Inverte a lógica: quanto menor a distância, maior o nível
     nivel_normalizado = 1 - ((distancia_original - min_val) / range_nivel)
     
-    # Garante que o percentual fique entre 0 e 100
     nivel_percentual = max(0.0, min(100.0, nivel_normalizado * 100.0))
     
     return round(nivel_percentual)
@@ -80,9 +76,6 @@ def _processar_leitura(leitura_obj: LeituraSQLAlchemy) -> Optional[LeituraRespon
         nivel=nivel_percentual,
         created_on=created_on_str
     )
-
-
-# --- 4. ROTAS DA API (ENDPOINTS) ---
 
 @app.get("/favicon.ico", include_in_schema=False)
 async def get_favicon():
