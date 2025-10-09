@@ -93,7 +93,7 @@ async def get_ultima_leitura_html(request: Request, db: Session = Depends(get_db
         
         leitura_processada = _processar_leitura(ultima_leitura_obj)
         print(leitura_processada.nivel)
-
+        print(leitura_processada.distancia)
         contexto_jinja = {
             "request": request,
             "leitura": leitura_processada
