@@ -58,13 +58,13 @@ def _processar_leitura(leitura_obj: LeituraSQLAlchemy) -> Optional[LeituraRespon
         return None
 
     nivel_percentual = _calcular_nivel_percentual(leitura_obj.distancia, MIN_NIVEL, MAX_NIVEL)
+    created_on_str = leitura_obj.created_on.isoformat() if leitura_obj.created_on else None
 
-    # Retorna um objeto Pydantic, não mais um TemplateResponse
     return LeituraResponse(
         id=leitura_obj.id,
         distancia=leitura_obj.distancia,
         nivel=nivel_percentual,
-        created_on=leitura_obj.created_on 
+        created_on=created_on_str 
     )
 
     leitura_dict['nivel'] = _calcular_nivel_percentual(leitura_obj.distancia,MIN_NIVEL,MAX_NIVEL)
